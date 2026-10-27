@@ -146,7 +146,7 @@ func (a *AuthServer) AuthChap(username []byte, chapid byte, chappwd, chapcha []b
 			return
 		}
 	} else {
-		err = fmt.Errorf("radius auth - no such user ", userip.String())
+		err = fmt.Errorf("radius auth - no such user %s", userip.String())
 	}
 	return
 }
@@ -178,7 +178,7 @@ func (a *AuthServer) AuthPap(username, userpwd []byte, userip net.IP) (err error
 			to = info.Timeout
 		}
 	} else {
-		err = fmt.Errorf("radius auth - no such user ", userip.String())
+		err = fmt.Errorf("radius auth - no such user %s", userip.String())
 	}
 	return
 }

@@ -40,6 +40,11 @@ func (v *Version) IsResponse(mesg portal.Message) bool {
 func (v *Version) Unmarshall(bts []byte) portal.Message {
 	msg := new(T_Message)
 	buf := bytes.NewBuffer(bts)
+	// v1 fixed header is 16 bytes. Reject truncated packets instead of
+	// reading past the buffer and panicking on malformed attribute lengths.
+	if buf.Len() < 16 {
+		return msg
+	}
 	var ipbts [4]byte
 	binary.Read(buf, binary.BigEndian, &msg.Header.Version)
 	binary.Read(buf, binary.BigEndian, &msg.Header.Type)
@@ -57,13 +62,31 @@ func (v *Version) Unmarshall(bts []byte) portal.Message {
 	// var auth [16]byte
 	// binary.Read(buf, binary.BigEndian, &auth)
 	// msg.Header.Authenticator = auth[:]
-	msg.Attrs = make([]T_Attr, msg.Header.AttrNum)
-	for i := byte(0); i < msg.Header.AttrNum; i++ {
-		attr := &msg.Attrs[i]
-		binary.Read(buf, binary.BigEndian, &attr.AttrType)
-		binary.Read(buf, binary.BigEndian, &attr.AttrLen)
-		attr.AttrStr = make([]byte, attr.AttrLen-2)
-		binary.Read(buf, binary.BigEndian, &attr.AttrStr)
+	attrNum := int(msg.Header.AttrNum)
+	if attrNum > 0 {
+		msg.Attrs = make([]T_Attr, attrNum)
+		for i := 0; i < attrNum; i++ {
+			// Each attribute on the wire is: type(1) + length(1) + data(len-2).
+			// Guard against AttrLen < 2 (would make a negative slice) and
+			// against lengths exceeding the remaining buffer.
+			if buf.Len() < 2 {
+				break
+			}
+			attrType, _ := buf.ReadByte()
+			attrLen, _ := buf.ReadByte()
+			if attrLen < 2 {
+				break
+			}
+			dataLen := int(attrLen) - 2
+			if dataLen > buf.Len() {
+				break
+			}
+			attr := &msg.Attrs[i]
+			attr.AttrType = attrType
+			attr.AttrLen = attrLen
+			attr.AttrStr = make([]byte, dataLen)
+			binary.Read(buf, binary.BigEndian, &attr.AttrStr)
+		}
 	}
 	return msg
 }

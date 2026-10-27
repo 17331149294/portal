@@ -6,13 +6,21 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"runtime/debug"
+	"sync"
 	"time"
 )
 
 var conn *net.UDPConn
 var cb_fallback func(Message, net.IP)
 var Ver Version
+
+// expectMu guards expect. Without a lock, concurrent reads (read-loop
+// goroutines) and writes/deletes (Send) on the map would trigger a fatal
+// "concurrent map read and map write" crash under load.
+var expectMu sync.Mutex
 var expect = make(map[uint16]chan Message)
+
 var timeout = fmt.Errorf("请求超时")
 var Timeout = 15
 
@@ -87,8 +95,17 @@ func ListenAndService(addr string) (err error) {
 			return err
 		}
 		go func(bts []byte) {
+			// A panic in any goroutine would otherwise kill the whole process.
+			defer func() {
+				if e := recover(); e != nil {
+					log.Printf("panic in portal handler: %v\n%s", e, debug.Stack())
+				}
+			}()
 			message := Ver.Unmarshall(bts)
-			if c, ok := expect[message.SerialId()]; ok {
+			expectMu.Lock()
+			c, ok := expect[message.SerialId()]
+			expectMu.Unlock()
+			if ok {
 				c <- message
 			} else {
 				log.Print("get a active message")
@@ -96,29 +113,47 @@ func ListenAndService(addr string) (err error) {
 			}
 		}(data[:n])
 	}
-
-	return
 }
 
 func Send(mess Message, dest net.IP, port int, secret string, sync bool) (Message, error) {
-	defer func() {
-		delete(expect, mess.SerialId())
-	}()
+	serial := mess.SerialId()
+	var c chan Message
+	if sync {
+		// Register the response channel BEFORE sending, otherwise a response
+		// arriving in the window before registration would be unmatched and
+		// routed to cb_fallback, causing a spurious timeout.
+		c = make(chan Message)
+		expectMu.Lock()
+		expect[serial] = c
+		expectMu.Unlock()
+		defer func() {
+			expectMu.Lock()
+			delete(expect, serial)
+			expectMu.Unlock()
+		}()
+	}
+
 	receiver, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", dest.String(), port))
-	conn.WriteTo(mess.Bytes(), receiver)
 	if err != nil {
 		return nil, err
 	}
+	// Capture the write error instead of silently swallowing it.
+	if _, err := conn.WriteTo(mess.Bytes(), receiver); err != nil {
+		return nil, err
+	}
+
 	if !sync {
 		return nil, nil
 	}
-	c := make(chan Message)
-	expect[mess.SerialId()] = c
-	// 发送数据
+
 	select {
 	case res := <-c:
 		return res, res.CheckFor(mess, secret)
 	case <-time.After(time.Duration(Timeout) * time.Second):
+		// Close the channel so a late-arriving response's send in the
+		// read-loop goroutine panics (caught by the recover) instead of
+		// leaking a blocked goroutine forever.
+		close(c)
 		return nil, timeout
 	}
 }

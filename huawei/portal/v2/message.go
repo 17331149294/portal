@@ -135,18 +135,28 @@ func (msg *T_Message) Bytes() []byte {
 // }
 
 func (t *T_Message) CheckFor(req portal.Message, secret string) error {
-	if t.Header.ErrCode == 0 { //Normal
-		return nil
+	reqMsg, ok := req.(*T_Message)
+	if !ok {
+		return fmt.Errorf("MD5鉴权错误: 请求报文类型不正确")
 	}
-	reqMsg := req.(*T_Message)
-	typ := t.Type()
-	des := "未知错误"
+	// Verify the response authenticator on BOTH the success and error paths.
+	// The received Authenticator must equal MD5(response with its authenticator
+	// field replaced by the request's authenticator || shared secret).
+	// Previously ErrCode==0 returned immediately without this check, so a forged
+	// success response (injected by an attacker who does not know the secret)
+	// would be trusted and could carry a chosen challenge / fake auth result.
 	wanted := t.Header.Authenticator
 	t.Header.Authenticator = reqMsg.Header.Authenticator
 	t.AuthBy(secret)
 	if bytes.Compare(t.Header.Authenticator, wanted) != 0 {
 		return fmt.Errorf("MD5鉴权错误")
 	}
+
+	if t.Header.ErrCode == 0 { //Normal
+		return nil
+	}
+	typ := t.Type()
+	des := "未知错误"
 	switch typ {
 	case portal.ACK_CHALLENGE:
 		switch t.Header.ErrCode {
