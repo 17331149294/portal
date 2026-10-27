@@ -1,0 +1,15 @@
+# 编译产物
+*.exe
+portal_linux_*
+portal_windows_*
+
+# 运行时生成
+debug.log
+mac.txt
+
+# IDE / 系统
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
