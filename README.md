@@ -132,6 +132,15 @@ GET /logout?userip=<用户IP>&nasip=<NAS IP>
 本模块无任何外部 Go 依赖，**不需要联网拉取依赖**即可编译（`go.mod` 为零依赖，
 radius 与 TOML 解析均为内置实现）。
 
+### Go 版本要求
+
+* **最低 Go 1.21**：`go.mod` 声明 `go 1.21`，modules 模式下本地工具链版本必须 ≥ 1.21，
+  否则报 `go.mod requires go >= 1.21`。
+* 交叉编译全部 8 平台（含 `windows/arm`、`windows/arm64`）同样要求 ≥ 1.21
+  （这两个 Windows 架构目标分别需 Go 1.18 / 1.17 以上，1.21 已完全覆盖）。
+* 云端 `.github/workflows/build.yml` 使用 `go-version: '1.21'`，与本地要求一致。
+* 装任意 ≥ 1.21 的版本即可，无需刻意装最新版。
+
 ### 本机编译（当前系统）
 
 ```bash
